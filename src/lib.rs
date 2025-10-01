@@ -1,3 +1,5 @@
-pub mod merklesquare;
+pub mod chronoforest;
+pub mod hash;
 
-pub use merklesquare::{Digest, MerkleSquare, Peak, Sha256Hasher};
+pub use chronoforest::{Digest, MerkleSquare, Peak};
+pub use hash::{Hash32, Hasher, Sha256Hasher};

@@ -1,5 +1,5 @@
-use crate::merklesquare::arena::{Arena, Node, NodeId};
-use crate::merklesquare::hash::{Hash32, Hasher, Sha256Hasher};
+use crate::chronoforest::arena::{Arena, Node, NodeId};
+use crate::hash::{Hash32, Hasher, Sha256Hasher};
 
 /// One “peak” (root of a perfect subtree) in the forest.
 #[derive(Copy, Clone, Debug)]
@@ -143,7 +143,7 @@ impl<H: Hasher> DefaultHasher<H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::merklesquare::hash::{Sha256Hasher};
+    use crate::hash::Sha256Hasher;
 
 
     #[test]

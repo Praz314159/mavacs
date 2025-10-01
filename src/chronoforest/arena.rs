@@ -1,4 +1,4 @@
-use crate::merklesquare::hash::Hash32;
+use crate::hash::Hash32;
 
 pub type NodeId = u32;
 
