@@ -9,7 +9,7 @@ enum PaddingScheme {
 }
 
 enum TreeStorageType {
-    StoredHashes(Vec<Vec<u8>>),
+    StoredLeaves(Vec<Vec<u8>>),
     StoredLeavesAndCalculatedHashes(Vec<Vec<u8>>),
 }
 
