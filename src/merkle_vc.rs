@@ -45,7 +45,7 @@ impl MerkleAVC {
         } else if index > root_index { 
             Err(TreeIndexError::IndexOutOfBounds)
         } else {
-            let parent: u16 = root_index - ((root_index - index) - 1)/2;
+            let parent = root_index - ((root_index - index) - 1)/2;
             Ok(parent)
         }        
     }
