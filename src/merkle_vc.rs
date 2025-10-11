@@ -19,16 +19,23 @@ pub struct MerkleAVC {
     pub num_attributes: u16,
     pub padding_scheme: PaddingScheme,
     //hash: Hasher,
-    pub stored_values: TreeStorageType
+    pub stored_values: TreeStorageType,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum TreeIndexError {
+    RootHasNoParent,
+    IndexOutOfBounds,
+    LeafHasNoChildren,
 }
 
 impl MerkleAVC {
     pub fn get_parent_index_for_full_mavc_with_zero_padding(&self, index: u16) -> Result<u16, String> {
         let root_index: u16 = 2_u16.pow(self.height as u32 + 1_u32) - 2;
         if index == root_index {
-            Err("Root node has no parent".to_string())
+            Err(TreeIndexError::RootHasNoParent)
         } else if index > root_index { 
-            Err("Index out of bounds".to_string()) 
+            Err(TreeIndexError::IndexOutOfBounds)
         } else {
             let parent: u16 = root_index - ((root_index - index) - 1)/2;
             Ok(parent)
@@ -40,9 +47,9 @@ impl MerkleAVC {
         let root_index: u16 = 2_u16.pow(self.height as u32 + 1_u32) - 2;
 
         if index > root_index {
-            Err("Index out of bounds".to_string())
+            Err(TreeIndexError::IndexOutOfBounds)
         } else if index <= last_leaf_index {
-            Err("Leaf node has no children".to_string())
+            Err(TreeIndexError::LeafHasNoChildren)
         } else {
             let left_child = root_index - ((root_index - index) * 2 + 2);
             Ok(left_child)
@@ -54,9 +61,9 @@ impl MerkleAVC {
         let root_index: u16 = 2_u16.pow(self.height as u32 + 1_u32) - 2;
 
         if index > root_index {
-            Err("Index out of bounds".to_string())
+            Err(TreeIndexError::IndexOutOfBounds)
         } else if index <= last_leaf_index {
-            Err("Leaf node has no children".to_string())
+            Err(TreeIndexError::LeafHasNoChildren)
         } else {
             let right_child = root_index - ((root_index - index) * 2 + 1);
             Ok(right_child)
@@ -174,7 +181,7 @@ mod tests {
         // Root index for height 3 is 14
         let result = tree.get_parent_index_for_full_mavc_with_zero_padding(14);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Root node has no parent");
+        assert_eq!(result.unwrap_err(), TreeIndexError::RootHasNoParent);
     }
 
     #[test]
@@ -184,7 +191,7 @@ mod tests {
         // Index 15 is out of bounds (root is 14)
         let result = tree.get_parent_index_for_full_mavc_with_zero_padding(15);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Index out of bounds");
+        assert_eq!(result.unwrap_err(), TreeIndexError::IndexOutOfBounds);
     }
 
     #[test]
@@ -223,11 +230,11 @@ mod tests {
         // Leaf nodes should have no children
         let left_result = tree.get_left_child_index_for_full_mavc_with_zero_padding(5);
         assert!(left_result.is_err());
-        assert_eq!(left_result.unwrap_err(), "Leaf node has no children");
+        assert_eq!(left_result.unwrap_err(), TreeIndexError::LeafHasNoChildren);
 
         let right_result = tree.get_right_child_index_for_full_mavc_with_zero_padding(5);
         assert!(right_result.is_err());
-        assert_eq!(right_result.unwrap_err(), "Leaf node has no children");
+        assert_eq!(right_result.unwrap_err(), TreeIndexError::LeafHasNoChildren);
     }
 
     #[test]
@@ -237,10 +244,10 @@ mod tests {
         // Index 15 is out of bounds (root is 14)
         let left_result = tree.get_left_child_index_for_full_mavc_with_zero_padding(15);
         assert!(left_result.is_err());
-        assert_eq!(left_result.unwrap_err(), "Index out of bounds");
+        assert_eq!(left_result.unwrap_err(), TreeIndexError::IndexOutOfBounds);
 
         let right_result = tree.get_right_child_index_for_full_mavc_with_zero_padding(15);
         assert!(right_result.is_err());
-        assert_eq!(right_result.unwrap_err(), "Index out of bounds");
+        assert_eq!(right_result.unwrap_err(), TreeIndexError::IndexOutOfBounds);
     }
 }
