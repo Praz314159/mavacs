@@ -30,8 +30,16 @@ pub enum TreeIndexError {
 }
 
 impl MerkleAVC {
-    pub fn get_parent_index_for_full_mavc_with_zero_padding(&self, index: u16) -> Result<u16, String> {
-        let root_index: u16 = 2_u16.pow(self.height as u32 + 1_u32) - 2;
+    const fn root_index(height: u16) -> u16 {
+        2_u16.pow(height as u32 + 1) - 2
+    }
+
+    const fn last_leaf_index(height: u16) -> u16 {
+        2_u16.pow(height as u32) - 1
+    }
+
+    pub fn get_parent_index_for_full_mavc_with_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+        let root_index = Self::root_index(height);
         if index == root_index {
             Err(TreeIndexError::RootHasNoParent)
         } else if index > root_index { 
@@ -42,9 +50,9 @@ impl MerkleAVC {
         }        
     }
 
-    pub fn get_left_child_index_for_full_mavc_with_zero_padding(&self, index: u16) -> Result<u16, String> {
-        let last_leaf_index: u16 = 2_u16.pow(self.height as u32) - 1;
-        let root_index: u16 = 2_u16.pow(self.height as u32 + 1_u32) - 2;
+    pub fn get_left_child_index_for_full_mavc_with_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+        let last_leaf_index = Self::last_leaf_index(height);
+        let root_index = Self::root_index(height);
 
         if index > root_index {
             Err(TreeIndexError::IndexOutOfBounds)
@@ -56,9 +64,9 @@ impl MerkleAVC {
         }        
     }
 
-    pub fn get_right_child_index_for_full_mavc_with_zero_padding(&self, index: u16) -> Result<u16, String> {
-        let last_leaf_index: u16 = 2_u16.pow(self.height as u32) - 1;
-        let root_index: u16 = 2_u16.pow(self.height as u32 + 1_u32) - 2;
+    pub fn get_right_child_index_for_full_mavc_with_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+        let last_leaf_index = Self::last_leaf_index(height);
+        let root_index = Self::root_index(height);
 
         if index > root_index {
             Err(TreeIndexError::IndexOutOfBounds)
@@ -73,7 +81,8 @@ impl MerkleAVC {
     fn build_full_mavc_with_zero_padding_from_vector_of_bytes(data: Vec<Vec<u8>>) -> Self {
         let num_attributes: u16 = data.len() as u16;
         let height: u16 = (num_attributes as f64).log2().ceil() as u16;
-        let root_index: u16 = 2_u16.pow(height as u32 + 1_u32) - 2;
+        let root_index = Self::root_index(height);
+        let last_leaf_index = Self::last_leaf_index(height);
 
         let mut all_nodes: Vec<Vec<u8>> = vec![];
 
