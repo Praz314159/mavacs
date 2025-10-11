@@ -84,7 +84,7 @@ impl MerkleAVC {
         let root_index = Self::root_index(height);
         let last_leaf_index = Self::last_leaf_index(height);
 
-        let mut all_nodes: Vec<Vec<u8>> = vec![];
+        let mut all_nodes: Vec<Vec<u8>> = Vec::with_capacity((root_index + 1) as usize);
         
         for curr_ind in 0..=root_index {
             if curr_ind < num_attributes {
