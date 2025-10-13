@@ -78,14 +78,14 @@ impl MerkleAVC {
         }
     }
 
-    fn build_from_data(data: Vec<Vec<u8>>, padding_scheme: PaddingScheme, tree_storage_type: TreeStorageType) -> Self {
+    fn build_from_data(data: &[Vec<u8>], padding_scheme: PaddingScheme, tree_storage_type: TreeStorageType) -> Self {
         match (padding_scheme, tree_storage_type) {
-            (PaddingScheme::Zero, TreeStorageType::StoredLeavesAndCalculatedHashes(nodes)) => Self::build_zero_padded_full_tree_from_data(data),
+            (PaddingScheme::Zero, TreeStorageType::StoredLeavesAndCalculatedHashes(_nodes)) => Self::build_zero_padded_full_tree_from_data(data),
             _ => unimplemented!("Only zero padding on a fully stored tree is implemented"),
         }
     }
 
-    fn build_zero_padded_full_tree_from_data(data: Vec<Vec<u8>>) -> Self {
+    fn build_zero_padded_full_tree_from_data(data: &[Vec<u8>]) -> Self {
         let num_attributes: u16 = data.len() as u16;
         let height: u16 = (num_attributes as f64).log2().ceil() as u16 + 1;
         let root_index = Self::root_index(height);
@@ -212,8 +212,8 @@ impl VectorCommitment for MerkleAVC {
     }
 
     fn commit(vector: &[Self::Element], _key: &Self::KeyMaterial) -> Self::Commitment {
-        Self::build_zero_padded_full_tree_from_data(vector.to_vec()).root //this does a lot of work to 
-                                                                                                //build the whole tree and clone it in to_vec just to return the root
+        Self::build_zero_padded_full_tree_from_data(vector).root //this does a lot of work to
+                                                                                                //build the whole tree just to return the root
                                                                                                 //maybe let's implement a method that solely computes the root
                                                                                                 //from the leaves without storing the whole tree
     }
@@ -228,7 +228,7 @@ impl VectorCommitment for MerkleAVC {
             panic!("Index out of bounds");
         }
         Self::generate_copath_for_zero_padded_full_tree(
-            &Self::build_zero_padded_full_tree_from_data(vector.to_vec()), //this is inefficient because it rebuilds the whole tree just to get the copath
+            &Self::build_zero_padded_full_tree_from_data(vector), //this is inefficient because it rebuilds the whole tree just to get the copath
             index as u16,
         )
     }
@@ -352,7 +352,7 @@ mod tests {
             vec![5u8, 6u8],
         ];
 
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data.clone());
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Tree should have height 3 (ceil(log2(3)) = 2, so 4 leaves)
         assert_eq!(tree.height, 3);
@@ -380,7 +380,7 @@ mod tests {
             vec![4u8],
         ];
 
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data);
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Should have height 3
         assert_eq!(tree.height, 3);
@@ -391,7 +391,7 @@ mod tests {
     fn test_build_zero_padded_tree_single_element() {
         let data = vec![vec![42u8]];
 
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data);
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Single element should have height 1
         assert_eq!(tree.height, 1);
@@ -414,7 +414,7 @@ mod tests {
             vec![4u8],
         ];
 
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data);
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Generate copath for first leaf (index 0)
         let copath = tree.generate_copath_for_zero_padded_full_tree(0);
@@ -437,7 +437,7 @@ mod tests {
             vec![4u8],
         ];
 
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data);
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Generate copath for middle leaf (index 2)
         let copath = tree.generate_copath_for_zero_padded_full_tree(2);
@@ -449,7 +449,7 @@ mod tests {
     #[should_panic(expected = "Index out of bounds")]
     fn test_generate_copath_out_of_bounds() {
         let data = vec![vec![1u8], vec![2u8]];
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data);
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Try to generate copath for index beyond num_attributes
         tree.generate_copath_for_zero_padded_full_tree(5);
@@ -464,7 +464,7 @@ mod tests {
             vec![50u8, 60u8],
         ];
 
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data.clone());
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Generate copath for index 1
         let copath = tree.generate_copath_for_zero_padded_full_tree(1);
@@ -489,7 +489,7 @@ mod tests {
             vec![30u8],
         ];
 
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data);
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Generate copath for index 0
         let copath = tree.generate_copath_for_zero_padded_full_tree(0);
@@ -510,7 +510,7 @@ mod tests {
     #[test]
     fn test_verify_copath_wrong_length() {
         let data = vec![vec![1u8], vec![2u8]];
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data);
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Create copath with wrong length
         let wrong_copath = vec![vec![0u8; 32]]; // Wrong length for height 1 tree
@@ -537,7 +537,7 @@ mod tests {
             vec![250u8],
         ];
 
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data.clone());
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Verify copath for each leaf
         for (index, value) in data.iter().enumerate() {
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn test_verify_copath_wrong_root() {
         let data = vec![vec![1u8], vec![2u8]];
-        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(data.clone());
+        let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         let copath = tree.generate_copath_for_zero_padded_full_tree(0);
 
