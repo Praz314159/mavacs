@@ -38,7 +38,7 @@ impl MerkleAVC {
         2_u16.pow(height as u32) - 1
     }
 
-    pub fn get_parent_index_for_full_mavc_with_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+    pub fn get_parent_index_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
         let root_index = Self::root_index(height);
         if index == root_index {
             Err(TreeIndexError::RootHasNoParent)
@@ -50,7 +50,7 @@ impl MerkleAVC {
         }
     }
 
-    pub fn get_left_child_index_for_full_mavc_with_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+    pub fn get_left_child_index_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
         let last_leaf_index = Self::last_leaf_index(height);
         let root_index = Self::root_index(height);
 
@@ -64,7 +64,7 @@ impl MerkleAVC {
         }
     }
 
-    pub fn get_right_child_index_for_full_mavc_with_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+    pub fn get_right_child_index_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
         let last_leaf_index = Self::last_leaf_index(height);
         let root_index = Self::root_index(height);
 
@@ -78,7 +78,14 @@ impl MerkleAVC {
         }
     }
 
-    fn build_full_mavc_with_zero_padding_from_vector_of_bytes(data: Vec<Vec<u8>>) -> Self {
+    fn build_from_data(data: Vec<Vec<u8>>, padding_scheme: PaddingScheme, tree_storage_type: TreeStorageType) -> Self {
+        match (padding_scheme, tree_storage_type) {
+            (PaddingScheme::Zero, TreeStorageType::StoredLeavesAndCalculatedHashes(nodes)) => Self::build_zero_padded_full_tree_from_data(data),
+            _ => unimplemented!("Only zero padding on a fully stored tree is implemented"),
+        }
+    }
+
+    fn build_zero_padded_full_tree_from_data(data: Vec<Vec<u8>>) -> Self {
         let num_attributes: u16 = data.len() as u16;
         let height: u16 = (num_attributes as f64).log2().ceil() as u16;
         let root_index = Self::root_index(height);
@@ -96,8 +103,8 @@ impl MerkleAVC {
                 hasher.update(&[0u8]); //zero padding
                 all_nodes.push(hasher.finalize().to_vec());
             } else {
-                let left_child_index: u16 = Self::get_left_child_index_for_full_mavc_with_zero_padding(height, curr_ind).unwrap(); //shouldn't panic because curr_ind is guaranteed to be an internal node here
-                let right_child_index: u16 = Self::get_right_child_index_for_full_mavc_with_zero_padding(height, curr_ind).unwrap();
+                let left_child_index: u16 = Self::get_left_child_index_zero_padding(height, curr_ind).unwrap(); //shouldn't panic because curr_ind is guaranteed to be an internal node here
+                let right_child_index: u16 = Self::get_right_child_index_zero_padding(height, curr_ind).unwrap();
 
                 let left_child_bytes: &[u8] = &all_nodes[left_child_index as usize];
                 let right_child_bytes: &[u8] = &all_nodes[right_child_index as usize];
@@ -121,7 +128,7 @@ impl MerkleAVC {
 
     }
 
-    fn generate_attribute_copath_for_full_mavc_with_zero_padding(&self, index: u16) -> Vec<Vec<u8>> {
+    fn generate_copath_for_zero_padded_full_tree(&self, index: u16) -> Vec<Vec<u8>> {
         if index >= self.num_attributes {
             panic!("Index out of bounds");
         }
@@ -130,7 +137,7 @@ impl MerkleAVC {
         let mut current_index = index;
 
         for _ in 0..(self.height - 1) {
-            let parent_index = Self::get_parent_index_for_full_mavc_with_zero_padding(self.height, current_index).unwrap(); //shouldn't panic because current_index is guaranteed to not be the root here
+            let parent_index = Self::get_parent_index_zero_padding(self.height, current_index).unwrap(); //shouldn't panic because current_index is guaranteed to not be the root here
             let sibling_index = current_index ^ 1; //sibling index is current_index with last bit flipped
 
             match &self.stored_values {
@@ -149,7 +156,7 @@ impl MerkleAVC {
     }
 
 
-    fn verify_attribute_copath_for_full_mavc_with_zero_padding(
+    fn verify_copath_for_zero_padded_full_tree(
         copath: &Vec<Vec<u8>>,
         root: &Vec<u8>,
         value: &Vec<u8>,
@@ -180,7 +187,7 @@ impl MerkleAVC {
                 hasher.update(&computed_hash);
             }
             computed_hash = hasher.finalize().to_vec(); // my previously owned vector is dropped here and a new one is copied in
-            current_index = match Self::get_parent_index_for_full_mavc_with_zero_padding(height, current_index) {
+            current_index = match Self::get_parent_index_zero_padding(height, current_index) {
                 Ok(parent) => parent,
                 Err(_) => return false, // should not happen if inputs are correct
             };
@@ -204,7 +211,7 @@ impl VectorCommitment for MerkleAVC {
     }
 
     fn commit(vector: &[Self::Element], _key: &Self::KeyMaterial) -> Self::Commitment {
-        Self::build_full_mavc_with_zero_padding_from_vector_of_bytes(vector.to_vec()).root //this does a lot of work to 
+        Self::build_zero_padded_full_tree_from_data(vector.to_vec()).root //this does a lot of work to 
                                                                                                 //build the whole tree and clone it in to_vec just to return the root
                                                                                                 //maybe let's implement a method that solely computes the root
                                                                                                 //from the leaves without storing the whole tree
@@ -219,8 +226,8 @@ impl VectorCommitment for MerkleAVC {
         if index >= vector.len() {
             panic!("Index out of bounds");
         }
-        Self::generate_attribute_copath_for_full_mavc_with_zero_padding(
-            &Self::build_full_mavc_with_zero_padding_from_vector_of_bytes(vector.to_vec()), //this is inefficient because it rebuilds the whole tree just to get the copath
+        Self::generate_copath_for_zero_padded_full_tree(
+            &Self::build_zero_padded_full_tree_from_data(vector.to_vec()), //this is inefficient because it rebuilds the whole tree just to get the copath
             index as u16,
         )
     }
@@ -246,16 +253,16 @@ mod tests {
 
         // For height 3: root_index = 14
         // Parent of node 12 should be 14
-        assert_eq!(MerkleAVC::get_parent_index_for_full_mavc_with_zero_padding(height, 12), Ok(14));
+        assert_eq!(MerkleAVC::get_parent_index_zero_padding(height, 12), Ok(14));
 
         // Parent of node 13 should be 14
-        assert_eq!(MerkleAVC::get_parent_index_for_full_mavc_with_zero_padding(height, 13), Ok(14));
+        assert_eq!(MerkleAVC::get_parent_index_zero_padding(height, 13), Ok(14));
 
         // Parent of node 10 should be 13
-        assert_eq!(MerkleAVC::get_parent_index_for_full_mavc_with_zero_padding(height, 10), Ok(13));
+        assert_eq!(MerkleAVC::get_parent_index_zero_padding(height, 10), Ok(13));
 
         // Parent of node 11 should be 13
-        assert_eq!(MerkleAVC::get_parent_index_for_full_mavc_with_zero_padding(height, 11), Ok(13));
+        assert_eq!(MerkleAVC::get_parent_index_zero_padding(height, 11), Ok(13));
     }
 
     #[test]
@@ -263,7 +270,7 @@ mod tests {
         let height = 3;
 
         // Root index for height 3 is 14
-        let result = MerkleAVC::get_parent_index_for_full_mavc_with_zero_padding(height, 14);
+        let result = MerkleAVC::get_parent_index_zero_padding(height, 14);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), TreeIndexError::RootHasNoParent);
     }
@@ -273,7 +280,7 @@ mod tests {
         let height = 3;
 
         // Index 15 is out of bounds (root is 14)
-        let result = MerkleAVC::get_parent_index_for_full_mavc_with_zero_padding(height, 15);
+        let result = MerkleAVC::get_parent_index_zero_padding(height, 15);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), TreeIndexError::IndexOutOfBounds);
     }
@@ -283,13 +290,13 @@ mod tests {
         let height = 3;
 
         // Left child of root (14) should be 12
-        assert_eq!(MerkleAVC::get_left_child_index_for_full_mavc_with_zero_padding(height, 14), Ok(12));
+        assert_eq!(MerkleAVC::get_left_child_index_zero_padding(height, 14), Ok(12));
 
         // Left child of node 13 should be 10
-        assert_eq!(MerkleAVC::get_left_child_index_for_full_mavc_with_zero_padding(height, 13), Ok(10));
+        assert_eq!(MerkleAVC::get_left_child_index_zero_padding(height, 13), Ok(10));
 
         // Left child of node 12 should be 8
-        assert_eq!(MerkleAVC::get_left_child_index_for_full_mavc_with_zero_padding(height, 12), Ok(8));
+        assert_eq!(MerkleAVC::get_left_child_index_zero_padding(height, 12), Ok(8));
     }
 
     #[test]
@@ -297,13 +304,13 @@ mod tests {
         let height = 3;
 
         // Right child of root (14) should be 13
-        assert_eq!(MerkleAVC::get_right_child_index_for_full_mavc_with_zero_padding(height, 14), Ok(13));
+        assert_eq!(MerkleAVC::get_right_child_index_zero_padding(height, 14), Ok(13));
 
         // Right child of node 13 should be 11
-        assert_eq!(MerkleAVC::get_right_child_index_for_full_mavc_with_zero_padding(height, 13), Ok(11));
+        assert_eq!(MerkleAVC::get_right_child_index_zero_padding(height, 13), Ok(11));
 
         // Right child of node 12 should be 9
-        assert_eq!(MerkleAVC::get_right_child_index_for_full_mavc_with_zero_padding(height, 12), Ok(9));
+        assert_eq!(MerkleAVC::get_right_child_index_zero_padding(height, 12), Ok(9));
     }
 
     #[test]
@@ -312,11 +319,11 @@ mod tests {
 
         // For height 3: last leaf index = 7
         // Leaf nodes should have no children
-        let left_result = MerkleAVC::get_left_child_index_for_full_mavc_with_zero_padding(height, 5);
+        let left_result = MerkleAVC::get_left_child_index_zero_padding(height, 5);
         assert!(left_result.is_err());
         assert_eq!(left_result.unwrap_err(), TreeIndexError::LeafHasNoChildren);
 
-        let right_result = MerkleAVC::get_right_child_index_for_full_mavc_with_zero_padding(height, 5);
+        let right_result = MerkleAVC::get_right_child_index_zero_padding(height, 5);
         assert!(right_result.is_err());
         assert_eq!(right_result.unwrap_err(), TreeIndexError::LeafHasNoChildren);
     }
@@ -326,11 +333,11 @@ mod tests {
         let height = 3;
 
         // Index 15 is out of bounds (root is 14)
-        let left_result = MerkleAVC::get_left_child_index_for_full_mavc_with_zero_padding(height, 15);
+        let left_result = MerkleAVC::get_left_child_index_zero_padding(height, 15);
         assert!(left_result.is_err());
         assert_eq!(left_result.unwrap_err(), TreeIndexError::IndexOutOfBounds);
 
-        let right_result = MerkleAVC::get_right_child_index_for_full_mavc_with_zero_padding(height, 15);
+        let right_result = MerkleAVC::get_right_child_index_zero_padding(height, 15);
         assert!(right_result.is_err());
         assert_eq!(right_result.unwrap_err(), TreeIndexError::IndexOutOfBounds);
     }
