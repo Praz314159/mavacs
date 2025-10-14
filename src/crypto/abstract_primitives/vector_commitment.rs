@@ -1,10 +1,14 @@
+/// 
+/// Traits for vector commitments 
+///
+///
+
 pub trait VectorCommitment {
     type Element;
     type PublicParams;
     type KeyMaterial;
     type Commitment;
     type Proof;
-
 
     fn keygen(security_param: usize) -> (Self::PublicParams, Self::KeyMaterial);
 
@@ -28,3 +32,5 @@ pub trait VectorCommitment {
         params: &Self::PublicParams,
     ) -> bool;
 }
+
+// TODO: extension of vector commitment trait for dynamic vector commitments
