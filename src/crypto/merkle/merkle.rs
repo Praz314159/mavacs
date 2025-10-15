@@ -98,6 +98,10 @@ impl MerkleAVC {
         total
     }
 
+    fn height_copy_padding(num_attributes: u16) -> u16 {
+        (num_attributes as f64).log2().ceil() as u16 + 1
+    }
+
     pub fn get_parent_index_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
         let root_index = Self::root_index(height);
         if index == root_index {
@@ -113,10 +117,11 @@ impl MerkleAVC {
     pub fn get_parent_index_copy_padding(index: u16, size_of_current_level: u16, first_index_of_current_level: u16) -> Result<u16, TreeIndexError> {
         if size_of_current_level <= 1 {
             Err(TreeIndexError::RootHasNoParent)
-        } else if index - first_index_of_current_level > size_of_current_level {
+        } else if index < first_index_of_current_level || index - first_index_of_current_level > size_of_current_level {
             Err(TreeIndexError::IndexOutOfBounds)
         } else {
-            Ok(1u16) //might not need this function idk yet.
+            let parent = (index - first_index_of_current_level) / 2 + first_index_of_current_level + size_of_current_level;
+            Ok(parent)
         }
     }
 
@@ -216,7 +221,7 @@ impl MerkleAVC {
         let num_attributes: u16 = data.len() as u16;
         let height: u16 = (num_attributes as f64).log2().ceil() as u16 + 1;
         let root_index = Self::root_index(height);
-        let last_leaf_index = num_attributes - 1;
+        let last_leaf_index = Self::last_leaf_index(height);
 
         let mut all_nodes: Vec<Vec<u8>> = Vec::with_capacity((root_index + 1) as usize);
 
@@ -259,17 +264,16 @@ impl MerkleAVC {
 
     }
 
-    fn generate_copath_for_copy_padded_full_tree(&self, index: u16) -> Vec<Vec<u8>> {
+    fn generate_copath_for_copy_padded_full_tree(&self, index: u16) -> Result<Vec<Vec<u8>>, TreeIndexError> {
         if index >= self.num_attributes {
-            panic!("Index out of bounds");
+            return Err(TreeIndexError::IndexOutOfBounds);
         }
 
         let mut copath: Vec<Vec<u8>> = Vec::with_capacity((self.height - 1) as usize);
-        let mut current_index = index;
 
-        let mut first_index_of_current_level: u16 = self.num_attributes;
-        let mut size_of_current_level: u16 = (self.num_attributes + 1) / 2;
-        let mut current_index = self.num_attributes;
+        let mut first_index_of_current_level: u16 = 0;
+        let mut size_of_current_level: u16 = self.num_attributes;
+        let mut current_index = index;
 
         for _ in 1..self.height {
             println!("Current level size: {}", size_of_current_level);
@@ -291,17 +295,17 @@ impl MerkleAVC {
                 },
             }
 
-            first_index_of_current_level += size_of_current_level;
             current_index = Self::get_parent_index_copy_padding(current_index, size_of_current_level, first_index_of_current_level).unwrap(); 
+            first_index_of_current_level += size_of_current_level; 
             size_of_current_level = (size_of_current_level + 1) / 2;
             }
 
-        copath
+        Ok(copath)
     }
 
-    fn generate_copath_for_zero_padded_full_tree(&self, index: u16) -> Vec<Vec<u8>> {
+    fn generate_copath_for_zero_padded_full_tree(&self, index: u16) -> Result<Vec<Vec<u8>>, TreeIndexError> {
         if index >= self.num_attributes {
-            panic!("Index out of bounds");
+            return Err(TreeIndexError::IndexOutOfBounds);
         }
 
         let mut copath: Vec<Vec<u8>> = Vec::with_capacity((self.height - 1) as usize);
@@ -324,7 +328,7 @@ impl MerkleAVC {
             current_index = parent_index;
         }
 
-        copath
+        Ok(copath)
     }
 
     fn verify_copath_for_copy_padded_full_tree(
@@ -334,7 +338,45 @@ impl MerkleAVC {
         index: u16,
         num_attributes: u16,
     ) -> bool {
-        true // Implement verification logic
+        let height = Self::height_copy_padding(num_attributes);
+
+        if copath.len() != (height-1) as usize {
+            println!("copath length: {}, expected: {}", copath.len(), (height-1) as usize);
+            return false; //copath length must be height - 1
+        }
+
+        let mut computed_hash: Vec<u8> = {
+            let mut hasher = Sha3_256::new();
+            hasher.update(value);
+            hasher.finalize().to_vec()
+        };
+
+        let mut current_index = index;
+        let mut first_index_of_current_level: u16 = 0;
+        let mut size_of_current_level: u16 = num_attributes;
+
+        for sibling_hash in copath {
+            let mut hasher = Sha3_256::new();
+            if (current_index - first_index_of_current_level) % 2 == 0 {
+                // current node is a left child
+                hasher.update(&computed_hash);
+                hasher.update(&sibling_hash);
+            } else {
+                // current node is a right child
+                hasher.update(&sibling_hash);
+                hasher.update(&computed_hash);
+            }
+            computed_hash = hasher.finalize().to_vec(); // my previously owned vector is dropped here and a new one is copied in
+
+            current_index = match Self::get_parent_index_copy_padding(current_index, size_of_current_level, first_index_of_current_level) {
+                Ok(parent) => parent,
+                Err(_) => return false, // should not happen if inputs are correct
+            };
+
+            first_index_of_current_level += size_of_current_level;
+            size_of_current_level = (size_of_current_level + 1) / 2;
+        }
+        &computed_hash == root
     }
 
     fn verify_copath_for_zero_padded_full_tree(
@@ -426,7 +468,7 @@ impl VectorCommitment for MerkleAVC {
         Self::generate_copath_for_zero_padded_full_tree(
             &Self::build_zero_padded_full_tree_from_data(vector), //this is inefficient because it rebuilds the whole tree just to get the copath
             index as u16,
-        )
+        ).unwrap()
     }
 
     fn verify(
@@ -445,7 +487,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parent_index_calculation() {
+    fn test_parent_index_calculation_zero_padding() {
         let height = 4;
 
         // For height 4: root_index = 14
@@ -460,6 +502,17 @@ mod tests {
 
         // Parent of node 11 should be 13
         assert_eq!(MerkleAVC::get_parent_index_zero_padding(height, 11), Ok(13));
+
+
+    }
+
+    #[test]
+    fn test_parent_index_calculation_copy_padding() {
+        assert_eq!(MerkleAVC::get_parent_index_copy_padding(2, 5, 0), Ok(6));
+
+        assert_eq!(MerkleAVC::get_parent_index_copy_padding(5, 3, 5), Ok(8));
+
+        assert_eq!(MerkleAVC::get_parent_index_copy_padding(7, 3, 5), Ok(9));
     }
 
     #[test]
@@ -648,7 +701,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_copath_first_leaf() {
+    fn test_generate_copath_first_leaf_zero_padding() {
         // Build a simple tree with 4 leaves
         let data = vec![
             vec![1u8],
@@ -660,7 +713,7 @@ mod tests {
         let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Generate copath for first leaf (index 0)
-        let copath = tree.generate_copath_for_zero_padded_full_tree(0);
+        let copath = tree.generate_copath_for_zero_padded_full_tree(0).unwrap();
 
         // For height 3, copath should have length 2 (height - 1)
         assert_eq!(copath.len(), 2);
@@ -672,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_copath_middle_leaf() {
+    fn test_generate_copath_middle_leaf_zero_padding() {
         let data = vec![
             vec![1u8],
             vec![2u8],
@@ -683,23 +736,23 @@ mod tests {
         let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Generate copath for middle leaf (index 2)
-        let copath = tree.generate_copath_for_zero_padded_full_tree(2);
+        let copath = tree.generate_copath_for_zero_padded_full_tree(2).unwrap();
 
         assert_eq!(copath.len(), 2);
     }
 
     #[test]
-    #[should_panic(expected = "Index out of bounds")]
-    fn test_generate_copath_out_of_bounds() {
+    fn test_generate_copath_out_of_bounds_zero_padding() {
         let data = vec![vec![1u8], vec![2u8]];
         let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Try to generate copath for index beyond num_attributes
-        tree.generate_copath_for_zero_padded_full_tree(5);
+        let result = tree.generate_copath_for_zero_padded_full_tree(5);
+        assert!(result.is_err(), "Should return error for out of bounds index");
     }
 
     #[test]
-    fn test_verify_copath_valid() {
+    fn test_verify_copath_valid_zero_padding() {
         // Build a tree
         let data = vec![
             vec![10u8, 20u8],
@@ -709,8 +762,18 @@ mod tests {
 
         let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
+        match tree.stored_values {
+            TreeStorageType::StoredLeavesAndCalculatedHashes(ref nodes) => {
+                // For height 3: root_index = 2^3 - 2 = 6
+                println!("Tree nodes: {:#?}", nodes);
+            },
+            _ => panic!("Expected StoredLeavesAndCalculatedHashes"),
+        }
+
         // Generate copath for index 1
-        let copath = tree.generate_copath_for_zero_padded_full_tree(1);
+        let copath = tree.generate_copath_for_zero_padded_full_tree(1).unwrap();
+
+        println!("Copath for index 1: {:#?}", copath);
 
         // Verify the copath with the correct value
         let is_valid = MerkleAVC::verify_copath_for_zero_padded_full_tree(
@@ -725,7 +788,7 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_copath_invalid_value() {
+    fn test_verify_copath_invalid_value_zero_padding() {
         let data = vec![
             vec![10u8],
             vec![20u8],
@@ -735,7 +798,7 @@ mod tests {
         let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
         // Generate copath for index 0
-        let copath = tree.generate_copath_for_zero_padded_full_tree(0);
+        let copath = tree.generate_copath_for_zero_padded_full_tree(0).unwrap();
 
         // Try to verify with wrong value
         let wrong_value = vec![99u8];
@@ -751,7 +814,7 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_copath_wrong_length() {
+    fn test_verify_copath_wrong_length_zero_padding() {
         let data = vec![vec![1u8], vec![2u8]];
         let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
@@ -770,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn test_copath_roundtrip_all_leaves() {
+    fn test_copath_roundtrip_all_leaves_zero_padding() {
         // Test that we can generate and verify copath for every leaf
         let data = vec![
             vec![100u8],
@@ -784,7 +847,7 @@ mod tests {
 
         // Verify copath for each leaf
         for (index, value) in data.iter().enumerate() {
-            let copath = tree.generate_copath_for_zero_padded_full_tree(index as u16);
+            let copath = tree.generate_copath_for_zero_padded_full_tree(index as u16).unwrap();
 
 
             let is_valid: bool = MerkleAVC::verify_copath_for_zero_padded_full_tree(
@@ -800,11 +863,11 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_copath_wrong_root() {
+    fn test_verify_copath_wrong_root_zero_padding() {
         let data = vec![vec![1u8], vec![2u8]];
         let tree = MerkleAVC::build_zero_padded_full_tree_from_data(&data);
 
-        let copath = tree.generate_copath_for_zero_padded_full_tree(0);
+        let copath = tree.generate_copath_for_zero_padded_full_tree(0).unwrap();
 
         // Use wrong root
         let wrong_root = vec![0u8; 32];
@@ -817,5 +880,130 @@ mod tests {
         );
 
         assert!(!is_valid, "Wrong root should fail verification");
+    }
+
+    #[test]
+    fn test_generate_copath_first_leaf_copy_padding() {
+        // Build a tree with 5 leaves using copy padding
+        let data = vec![
+            vec![1u8],
+            vec![2u8],
+            vec![3u8],
+            vec![4u8],
+            vec![5u8],
+        ];
+
+        let tree = MerkleAVC::build_copy_padded_full_tree_from_data(&data);
+
+        println!("Tree height: {}", tree.height);
+        println!("Number of attributes: {}", tree.num_attributes); 
+        println!("Tree root: {:?}", tree.root);
+
+        // Generate copath for first leaf (index 0)
+        let copath = tree.generate_copath_for_copy_padded_full_tree(0).unwrap();
+
+        // For height 4, copath should have length 3 (height - 1)
+        assert_eq!(copath.len(), 3);
+
+        // Each element should be a hash
+        for hash in &copath {
+            assert!(!hash.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_verify_copath_valid_copy_padding() {
+        // Build a tree with copy padding
+        let data = vec![
+            vec![10u8, 20u8],
+            vec![30u8, 40u8],
+            vec![50u8, 60u8],
+        ];
+
+        let tree = MerkleAVC::build_copy_padded_full_tree_from_data(&data);
+
+        match tree.stored_values {
+            TreeStorageType::StoredLeavesAndCalculatedHashes(ref nodes) => {
+                // For height 3: root_index = 2^3 - 2 = 6
+                // Should have 7 nodes (indices 0-6)
+                println!("Pretty-printed debug of points: {:#?}", nodes);
+            }
+            _ => panic!("Expected StoredLeavesAndCalculatedHashes"),
+        }
+        
+
+        // Generate copath for index 1
+        let copath = tree.generate_copath_for_copy_padded_full_tree(1).unwrap();
+
+        println!("Copath for index 1: {:#?}", copath);
+
+        // Verify the copath with the correct value
+        let is_valid = MerkleAVC::verify_copath_for_copy_padded_full_tree(
+            &copath,
+            &tree.root,
+            &data[1],
+            1,
+            tree.num_attributes,
+        );
+
+        assert!(is_valid, "Valid copath should verify successfully");
+    }
+
+    #[test]
+    fn test_verify_copath_invalid_value_copy_padding() {
+        let data = vec![
+            vec![1u8],
+            vec![2u8],
+            vec![3u8],
+        ];
+
+        let tree = MerkleAVC::build_copy_padded_full_tree_from_data(&data);
+
+        // Generate copath for index 0
+        let copath = tree.generate_copath_for_copy_padded_full_tree(0).unwrap();
+        println!("test copath: {:#?}", copath);
+        // Try to verify with wrong value
+        let wrong_value = vec![5u8];
+        println!("wrong value: {:?}", wrong_value);
+        let is_valid = MerkleAVC::verify_copath_for_copy_padded_full_tree(
+            &copath,
+            &tree.root,
+            &wrong_value,
+            0,
+            tree.num_attributes,
+        );
+
+        println!("is valid: {}", is_valid);
+
+        assert!(!is_valid, "Invalid value should fail verification");
+    }
+
+    #[test]
+    fn test_copath_roundtrip_all_leaves_copy_padding() {
+        // Test that we can generate and verify copath for every leaf with copy padding
+        let data = vec![
+            vec![100u8],
+            vec![200u8],
+            vec![50u8],
+            vec![150u8],
+            vec![250u8],
+        ];
+
+        let tree = MerkleAVC::build_copy_padded_full_tree_from_data(&data);
+
+        // Verify copath for each leaf
+        for (index, value) in data.iter().enumerate() {
+            let copath = tree.generate_copath_for_copy_padded_full_tree(index as u16).unwrap();
+
+            let is_valid: bool = MerkleAVC::verify_copath_for_copy_padded_full_tree(
+                &copath,
+                &tree.root,
+                value,
+                index as u16,
+                tree.num_attributes,
+            );
+
+            assert!(is_valid, "Copath for leaf {} should verify", index);
+        }
     }
 }
