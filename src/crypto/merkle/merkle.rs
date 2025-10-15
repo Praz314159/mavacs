@@ -1,9 +1,26 @@
-use std::thread::current;
+/// This is an implementation of a Merkle Tree. Merkle trees are essential 
+/// to a fully hash-based implementation of AVACS. We can use them both as 
+/// dynamic universal accumulators for the Issuer's CMS as well as a static 
+/// vector commitments for the VAC.  
+///
+/// The Merkle Tree is the fundamental building block required for more complex 
+/// authenticated data structures. 
+///     -- Patricia Tries with non-membership proofs 
+///     -- Merkle Mountain Ranges for dynamism in the passive revocation regime 
+/// 
+/// It's important for the implementation to be very robust (should make heavy and 
+/// intelligent use of traits) and also fast/memory efficient. 
+///  
 
-use crate::vector_commitment::VectorCommitment;
-//use std::hash::{Hasher, Hash::{Digest, Hasher}};
+use crate::crypto::abstract_primitives::vector_commitment::VectorCommitment;
+use crate::crypto::merkle::errors::TreeIndexError;
 use sha3::{Digest, Sha3_256};
 
+/// This is typically called a padding rule. Now, one thing that is interesting 
+/// to consider here is the difference between a merkle patricia trie and a merkle 
+/// tree. Merkle trees typically are full trees of arity two. But in general, trees 
+/// can have any arity. Tries on the other hand don't necessarily have to be full. 
+/// Padding makes sense of course when the tree must be full. 
 pub enum PaddingScheme {
     Zero,
     Copy(Vec<u8>), // the associated vector will contain the precomputed indices of each level.
@@ -15,6 +32,37 @@ pub enum TreeStorageType {
     StoredLeavesAndCalculatedHashes(Vec<Vec<u8>>),
 }
 
+/// TODO: A merkle tree should be generic over a hash function. This 
+/// is an object that implements the hasher trait. 
+/// 
+/// TODO: We also want a separate type for authentication path. The generate  
+///
+/// TODO: One thing that needs to change here is the framing of "attribute vector
+/// commitment". We need merkle trees in a lot of different places. When designing 
+/// the type system, we want a base merkle tree construction that can be used in a lot 
+/// of different places, since it will have to be. If we had a trait "hashable", we could 
+/// have an associated type leaf that must be hashable. Because we will have an attribute type 
+/// that is also hashable, the attribute can serve as a leaf in a merkle tree. Then, we 
+/// can use a merkle tree as a vector commitment over attributes directly when creating 
+/// credentials. 
+///
+/// TODO: The interface should probably be improved. Function names here are pretty horrendous and 
+/// can be cleaned. I think also there's a question about what functions should be helper
+/// functions. 
+///
+/// TODO: It's worth looking more closely at the following paper:
+/// https://eprint.iacr.org/2023/1830.pdf. There are two reasons for this: 
+///     1. I know this is the exposition in most places, and that I glossed over the point so that
+///        we could move forward, but it isn't always the case that internal nodes are simply
+///        computed as H(left_child||right_child). In general, we define some sort of "addition"
+///        rule, which happens classically to be concatenation. 
+///     2. Homomorphic trees provide sublinear updates. These are the lowerbounds that are used in
+///        my thesis. 
+///
+/// In general, I think we need to come up with a trait system for merkle objects: tries, trees, 
+/// homomorphic trees, leaves, paths, etc. It makes sense that a tree completes a trie and that a 
+/// homomorphic tree is an extension of a tree. 
+///
 pub struct MerkleAVC {
     pub root: Vec<u8>,
     pub height: u16,
@@ -22,13 +70,6 @@ pub struct MerkleAVC {
     pub padding_scheme: PaddingScheme,
     //hash: Hasher,
     pub stored_values: TreeStorageType,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum TreeIndexError {
-    RootHasNoParent,
-    IndexOutOfBounds,
-    LeafHasNoChildren,
 }
 
 impl MerkleAVC {
@@ -189,7 +230,8 @@ impl MerkleAVC {
                 hasher.update(&[0u8]); //zero padding
                 all_nodes.push(hasher.finalize().to_vec());
             } else {
-                let left_child_index: u16 = Self::get_left_child_index_zero_padding(height, curr_ind).unwrap(); //shouldn't panic because curr_ind is guaranteed to be an internal node here
+                // shouldn't panic because curr_ind is guaranteed to be an internal node here 
+                let left_child_index: u16 = Self::get_left_child_index_zero_padding(height, curr_ind).unwrap();
                 let right_child_index: u16 = Self::get_right_child_index_zero_padding(height, curr_ind).unwrap();
 
                 let left_child_bytes: &[u8] = &all_nodes[left_child_index as usize];
@@ -198,11 +240,14 @@ impl MerkleAVC {
                 let mut hasher = Sha3_256::new();
                 hasher.update(left_child_bytes);
                 hasher.update(right_child_bytes);
-                all_nodes.push(hasher.finalize().to_vec()); // so the hasher owns its own copy of the vector. to_vec clones it since we want all_nodes to own its own copy. Is there some way to avoid this? This is a cheap clone so dw ig.
+                all_nodes.push(hasher.finalize().to_vec()); 
+                // so the hasher owns its own copy of the vector. to_vec clones it since we want all_nodes 
+                // to own its own copy. Is there some way to avoid this? This is a cheap clone so dw ig.
             }
         }
 
-        let root: Vec<u8> = all_nodes[root_index as usize].clone(); //we want the merkle tree to own the root as a copy as well methinks
+        // we want the merkle tree to own the root as a copy as well methinks 
+        let root: Vec<u8> = all_nodes[root_index as usize].clone();
 
         MerkleAVC {
             root,
@@ -263,7 +308,8 @@ impl MerkleAVC {
         let mut current_index = index;
 
         while current_index < Self::root_index(self.height) {
-            let parent_index = Self::get_parent_index_zero_padding(self.height, current_index).unwrap(); //won't panic because current_index is guaranteed to not be the root here
+            let parent_index = Self::get_parent_index_zero_padding(self.height, current_index).unwrap(); 
+            //won't panic because current_index is guaranteed to not be the root here
             let sibling_index = current_index ^ 1;
 
             match &self.stored_values {
@@ -335,6 +381,18 @@ impl MerkleAVC {
 
 }
 
+/// We want to implement abstract primitive traits for our merkle objects. Here is actually a
+/// pretty good example. I forgot about this, but I used this library while implementing the last 
+/// chapter of my thesis: https://github.com/facebook/winterfell/blob/main/crypto/src/merkle/mod.rs 
+///
+/// They have a vector commitment trait and a merkle tree that implements the trait as well. For
+/// us, things are different because we need much more merkle diversity. Here is another crate: 
+/// https://crates.io/crates/merkletree. This code was developed by the protocol labs guys. They 
+/// are super good, but a classic case of research with no direction. The code is very rust
+/// idiomatic and this is code that is incredibly memory efficient. I would look through it to see 
+/// what types of patters they use and decisions they make. Our code will be much more readable
+/// than this. Typically, the best place to start is adapting ideas from what is already out there. 
+///
 impl VectorCommitment for MerkleAVC {
     type Element = Vec<u8>;
     type PublicParams = ();
@@ -342,15 +400,18 @@ impl VectorCommitment for MerkleAVC {
     type Commitment = Vec<u8>;
     type Proof = Vec<Vec<u8>>; // copath hashes
 
+    // we can think about this a bit more closely. In the case of hash-based schemes, because we
+    // are in a symmetric key setting, this isn't always necessary. We should do the exercise of
+    // looking at some 
     fn keygen(_security_param: usize) -> (Self::PublicParams, Self::KeyMaterial) {
         ((), ()) // I suppose we could use the security param to choose a hash function that achieves the appropriate security level
     }
 
     fn commit(vector: &[Self::Element], _key: &Self::KeyMaterial) -> Self::Commitment {
-        Self::build_zero_padded_full_tree_from_data(vector).root //this does a lot of work to
-                                                                                                //build the whole tree just to return the root
-                                                                                                //maybe let's implement a method that solely computes the root
-                                                                                                //from the leaves without storing the whole tree
+        Self::build_zero_padded_full_tree_from_data(vector).root 
+        // this does a lot of work to build the whole tree just to return the root
+        // maybe let's implement a method that solely computes the root from the leaves 
+        // without storing the whole tree
     }
 
     fn open(

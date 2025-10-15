@@ -1,11 +1,5 @@
-mod credential;
-mod vector_commitment;
-mod merkle_vc;
 
-use credential::{Credential, AttributeValue};
-
-use crate::merkle_vc::{MerkleAVC, PaddingScheme, TreeStorageType};
-//use sha3::{Digest, Sha3_256};
+use mavacs_plus::prelude::*;
 
 fn main() {
     //let x = Serialize::serialize(&"Hello, world!").unwrap();
@@ -14,7 +8,7 @@ fn main() {
     let cred: Credential = Credential::new(vec![
         AttributeValue::Integer(-12345),
         AttributeValue::UnsignedInteger(54321),
-        AttributeValue::String("Hello, world!".to_string()),
+        AttributeValue::String("Prashanth".to_string()),
     ]);
 
     let byte_vector: Vec<Vec<u8>> = cred.to_byte_vector().unwrap();
