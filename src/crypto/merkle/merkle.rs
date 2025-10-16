@@ -23,7 +23,7 @@ use sha3::{Digest, Sha3_256};
 /// Padding makes sense of course when the tree must be full. 
 pub enum PaddingScheme {
     Zero,
-    Copy(Vec<u8>), // the associated vector will contain the precomputed indices of each level.
+    Copy, // the associated vector will contain the precomputed indices of each level.
     Random(u8),
 }
 
@@ -156,7 +156,7 @@ impl MerkleAVC {
     pub fn build_from_data(data: &[Vec<u8>], padding_scheme: PaddingScheme, tree_storage_type: TreeStorageType) -> Self {
         match (padding_scheme, tree_storage_type) {
             (PaddingScheme::Zero, TreeStorageType::StoredLeavesAndCalculatedHashes(_nodes)) => Self::build_zero_padded_full_tree_from_data(data),
-            (PaddingScheme::Copy(a), TreeStorageType::StoredLeavesAndCalculatedHashes(_nodes)) => Self::build_copy_padded_full_tree_from_data(data),
+            (PaddingScheme::Copy, TreeStorageType::StoredLeavesAndCalculatedHashes(_nodes)) => Self::build_copy_padded_full_tree_from_data(data),
             _ => panic!("This combination of padding scheme and tree storage type is not implemented yet"),
         }
     }
@@ -211,7 +211,7 @@ impl MerkleAVC {
             root,
             height,
             num_attributes,
-            padding_scheme: PaddingScheme::Copy(vec![]), // the associated vector will contain the precomputed indices of each level, maybe.
+            padding_scheme: PaddingScheme::Copy,
             stored_values: TreeStorageType::StoredLeavesAndCalculatedHashes(all_nodes),
         }
 
