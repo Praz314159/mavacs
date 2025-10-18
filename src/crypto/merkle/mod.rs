@@ -1,3 +1,5 @@
 pub mod merkle;
-pub mod errors; 
+pub mod errors;
 
+#[cfg(test)]
+mod tests;
