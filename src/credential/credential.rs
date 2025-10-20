@@ -15,6 +15,7 @@
 /// circuits. 
 
 use serde::{Serialize, Deserialize};
+use std::fmt;
 
 /// Represents the possible types of values an attribute can hold
 ///
@@ -38,6 +39,16 @@ pub enum AttributeValue {
     
     /// Owned string
     String(String),
+}
+
+impl fmt::Display for AttributeValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            AttributeValue::Integer(n) => write!(f, "Integer({})", n),
+            AttributeValue::UnsignedInteger(n) => write!(f, "UInt({})", n),
+            AttributeValue::String(s) => write!(f, "String(\"{}\")", s),
+        }
+    }
 }
 
 /// A credential containing a vector of attributes
@@ -102,5 +113,17 @@ impl Credential {
             .iter()
             .map(|attr| bincode::serialize(attr))
             .collect()
+    }
+}
+
+impl fmt::Display for Credential {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "Credential with {} attributes:", self.attributes.len())?;
+
+        for (i, attr) in self.attributes.iter().enumerate() {
+            writeln!(f, "  [{}] {}", i, attr)?;
+        }
+
+        Ok(())
     }
 }

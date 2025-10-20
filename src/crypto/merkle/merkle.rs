@@ -15,18 +15,31 @@
 use crate::crypto::abstract_primitives::vector_commitment::VectorCommitment;
 use crate::crypto::merkle::errors::TreeIndexError;
 use sha3::{Digest, Sha3_256};
+use std::fmt;
 
 /// This is typically called a padding rule. Now, one thing that is interesting
 /// to consider here is the difference between a merkle patricia trie and a merkle
 /// tree. Merkle trees typically are full trees of arity two. But in general, trees
 /// can have any arity. Tries on the other hand don't necessarily have to be full.
 /// Padding makes sense of course when the tree must be full.
+#[derive(Debug)]
 pub enum PaddingRule {
     Zero,
     Copy, // the associated vector will contain the precomputed indices of each level.
     Random(u8),
 }
 
+impl fmt::Display for PaddingRule {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PaddingRule::Zero => write!(f, "Zero"),
+            PaddingRule::Copy => write!(f, "Copy"),
+            PaddingRule::Random(seed) => write!(f, "Random({})", seed),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum TreeStorageType {
     Leaves(Vec<Vec<u8>>),
     Full(Vec<Vec<u8>>),
@@ -59,10 +72,11 @@ pub enum TreeStorageType {
 ///     2. Homomorphic trees provide sublinear updates. These are the lowerbounds that are used in
 ///        my thesis. 
 ///
-/// In general, I think we need to come up with a trait system for merkle objects: tries, trees, 
-/// homomorphic trees, leaves, paths, etc. It makes sense that a tree completes a trie and that a 
-/// homomorphic tree is an extension of a tree. 
+/// In general, I think we need to come up with a trait system for merkle objects: tries, trees,
+/// homomorphic trees, leaves, paths, etc. It makes sense that a tree completes a trie and that a
+/// homomorphic tree is an extension of a tree.
 ///
+#[derive(Debug)]
 pub struct MerkleAVC {
     pub root: Vec<u8>,
     pub height: u16,
@@ -507,5 +521,23 @@ impl VectorCommitment for MerkleAVC {
         params: &Self::PublicParams,
     ) -> bool {
         true // Implement verification logic
+    }
+}
+
+impl fmt::Display for MerkleAVC {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Show summary without dumping all the bytes
+        write!(
+            f,
+            "MerkleAVC(height={}, attributes={}, padding={}, root={}...)",
+            self.height,
+            self.num_attributes,
+            self.padding_rule,
+            // Show first 8 bytes of root in hex
+            self.root.iter()
+                .take(8)
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>()
+        )
     }
 }
