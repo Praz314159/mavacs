@@ -16,20 +16,20 @@ use crate::crypto::abstract_primitives::vector_commitment::VectorCommitment;
 use crate::crypto::merkle::errors::TreeIndexError;
 use sha3::{Digest, Sha3_256};
 
-/// This is typically called a padding rule. Now, one thing that is interesting 
-/// to consider here is the difference between a merkle patricia trie and a merkle 
-/// tree. Merkle trees typically are full trees of arity two. But in general, trees 
-/// can have any arity. Tries on the other hand don't necessarily have to be full. 
-/// Padding makes sense of course when the tree must be full. 
-pub enum PaddingScheme {
+/// This is typically called a padding rule. Now, one thing that is interesting
+/// to consider here is the difference between a merkle patricia trie and a merkle
+/// tree. Merkle trees typically are full trees of arity two. But in general, trees
+/// can have any arity. Tries on the other hand don't necessarily have to be full.
+/// Padding makes sense of course when the tree must be full.
+pub enum PaddingRule {
     Zero,
     Copy, // the associated vector will contain the precomputed indices of each level.
     Random(u8),
 }
 
 pub enum TreeStorageType {
-    StoredLeaves(Vec<Vec<u8>>),
-    StoredLeavesAndCalculatedHashes(Vec<Vec<u8>>),
+    Leaves(Vec<Vec<u8>>),
+    Full(Vec<Vec<u8>>),
 }
 
 /// TODO: A merkle tree should be generic over a hash function. This 
@@ -67,7 +67,7 @@ pub struct MerkleAVC {
     pub root: Vec<u8>,
     pub height: u16,
     pub num_attributes: u16,
-    pub padding_scheme: PaddingScheme,
+    pub padding_rule: PaddingRule,
     //hash: Hasher,
     pub stored_values: TreeStorageType,
 }
@@ -81,7 +81,7 @@ impl MerkleAVC {
         2_u16.pow(height as u32 - 1) - 1
     }
 
-    pub(crate) const fn root_index_copy_padding(num_attributes: u16) -> u16 {
+    pub const fn root_index_copy_padding(num_attributes: u16) -> u16 {
         // The worst case for zero padding is when a = 2^k + 1. The tree will have 2^(k+2) - 1 nodes.
             //For copy padding, the tree will have only 2^(k+1) + k + 1 nodes. We don't have to store almost half the nodes.
             //But, we have to do more work to calculate parent indices and child indices.
@@ -98,11 +98,11 @@ impl MerkleAVC {
         total
     }
 
-    pub(crate) fn height_copy_padding(num_attributes: u16) -> u16 {
+    pub fn height_copy_padding(num_attributes: u16) -> u16 {
         (num_attributes as f64).log2().ceil() as u16 + 1
     }
 
-    pub fn get_parent_index_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+    pub fn parent_index_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
         let root_index = Self::root_index(height);
         if index == root_index {
             Err(TreeIndexError::RootHasNoParent)
@@ -114,7 +114,7 @@ impl MerkleAVC {
         }
     }
 
-    pub fn get_parent_index_copy_padding(index: u16, size_of_current_level: u16, first_index_of_current_level: u16) -> Result<u16, TreeIndexError> {
+    pub fn parent_index_copy_padding(index: u16, size_of_current_level: u16, first_index_of_current_level: u16) -> Result<u16, TreeIndexError> {
         if size_of_current_level <= 1 {
             Err(TreeIndexError::RootHasNoParent)
         } else if index < first_index_of_current_level || index - first_index_of_current_level > size_of_current_level {
@@ -125,7 +125,7 @@ impl MerkleAVC {
         }
     }
 
-    pub fn get_left_child_index_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+    pub fn left_child_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
         let last_leaf_index = Self::last_leaf_index(height);
         let root_index = Self::root_index(height);
 
@@ -139,7 +139,7 @@ impl MerkleAVC {
         }
     }
 
-    pub fn get_right_child_index_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
+    pub fn right_child_zero_padding(height: u16, index: u16) -> Result<u16, TreeIndexError> {
         let last_leaf_index = Self::last_leaf_index(height);
         let root_index = Self::root_index(height);
 
@@ -153,15 +153,47 @@ impl MerkleAVC {
         }
     }
 
-    pub fn build_from_data(data: &[Vec<u8>], padding_scheme: PaddingScheme, tree_storage_type: TreeStorageType) -> Self {
-        match (padding_scheme, tree_storage_type) {
-            (PaddingScheme::Zero, TreeStorageType::StoredLeavesAndCalculatedHashes(_nodes)) => Self::build_zero_padded_full_tree_from_data(data),
-            (PaddingScheme::Copy, TreeStorageType::StoredLeavesAndCalculatedHashes(_nodes)) => Self::build_copy_padded_full_tree_from_data(data),
-            _ => panic!("This combination of padding scheme and tree storage type is not implemented yet"),
+    pub fn build(data: &[Vec<u8>], rule: PaddingRule, storage: TreeStorageType) -> Self {
+        match (rule, storage) {
+            (PaddingRule::Zero, TreeStorageType::Full(_nodes)) => Self::build_zero_padding(data),
+            (PaddingRule::Copy, TreeStorageType::Full(_nodes)) => Self::build_copy_padding(data),
+            _ => panic!("This combination of padding rule and tree storage type is not implemented yet"),
         }
     }
 
-    pub(crate) fn build_copy_padded_full_tree_from_data(data: &[Vec<u8>]) -> Self {
+    pub fn open(&self, index: u16) -> Result<Vec<Vec<u8>>, TreeIndexError> {
+        if index >= self.num_attributes {
+            return Err(TreeIndexError::IndexOutOfBounds);
+        }
+
+        match self.padding_rule {
+            PaddingRule::Zero => self.open_zero_padding(index),
+            PaddingRule::Copy => self.open_copy_padding(index),
+            PaddingRule::Random(_) => todo!(),
+        }
+    }
+
+    pub fn verify(
+        copath: &Vec<Vec<u8>>,
+        root: &Vec<u8>,
+        value: &Vec<u8>,
+        index: u16,
+        rule: PaddingRule,
+        num_attributes: u16,
+    ) -> bool {
+        match rule {
+            PaddingRule::Zero => {
+                let height = (num_attributes as f64).log2().ceil() as u16 + 1;
+                Self::verify_zero_padding(copath, root, value, index, height)
+            }
+            PaddingRule::Copy => {
+                Self::verify_copy_padding(copath, root, value, index, num_attributes)
+            }
+            PaddingRule::Random(_) => todo!(),
+        }
+    }
+
+    pub fn build_copy_padding(data: &[Vec<u8>]) -> Self {
         let num_attributes = data.len() as u16;
         let root_index = Self::root_index_copy_padding(num_attributes);
         let height: u16 = (num_attributes as f64).log2().ceil() as u16 + 1;
@@ -211,13 +243,13 @@ impl MerkleAVC {
             root,
             height,
             num_attributes,
-            padding_scheme: PaddingScheme::Copy,
-            stored_values: TreeStorageType::StoredLeavesAndCalculatedHashes(all_nodes),
+            padding_rule: PaddingRule::Copy,
+            stored_values: TreeStorageType::Full(all_nodes),
         }
 
     }
 
-    pub(crate) fn build_zero_padded_full_tree_from_data(data: &[Vec<u8>]) -> Self {
+    pub fn build_zero_padding(data: &[Vec<u8>]) -> Self {
         let num_attributes: u16 = data.len() as u16;
         let height: u16 = (num_attributes as f64).log2().ceil() as u16 + 1;
         let root_index = Self::root_index(height);
@@ -235,9 +267,9 @@ impl MerkleAVC {
                 hasher.update(&[0u8]); //zero padding
                 all_nodes.push(hasher.finalize().to_vec());
             } else {
-                // shouldn't panic because curr_ind is guaranteed to be an internal node here 
-                let left_child_index: u16 = Self::get_left_child_index_zero_padding(height, curr_ind).unwrap();
-                let right_child_index: u16 = Self::get_right_child_index_zero_padding(height, curr_ind).unwrap();
+                // shouldn't panic because curr_ind is guaranteed to be an internal node here
+                let left_child_index: u16 = Self::left_child_zero_padding(height, curr_ind).unwrap();
+                let right_child_index: u16 = Self::right_child_zero_padding(height, curr_ind).unwrap();
 
                 let left_child_bytes: &[u8] = &all_nodes[left_child_index as usize];
                 let right_child_bytes: &[u8] = &all_nodes[right_child_index as usize];
@@ -258,13 +290,13 @@ impl MerkleAVC {
             root,
             height,
             num_attributes,
-            padding_scheme: PaddingScheme::Zero,
-            stored_values: TreeStorageType::StoredLeavesAndCalculatedHashes(all_nodes),
+            padding_rule: PaddingRule::Zero,
+            stored_values: TreeStorageType::Full(all_nodes),
         }
 
     }
 
-    pub(crate) fn generate_copath_for_copy_padded_full_tree(&self, index: u16) -> Result<Vec<Vec<u8>>, TreeIndexError> {
+    pub fn open_copy_padding(&self, index: u16) -> Result<Vec<Vec<u8>>, TreeIndexError> {
         if index >= self.num_attributes {
             return Err(TreeIndexError::IndexOutOfBounds);
         }
@@ -284,15 +316,15 @@ impl MerkleAVC {
             };
 
             match &self.stored_values {
-                TreeStorageType::StoredLeavesAndCalculatedHashes(all_nodes) => {
+                TreeStorageType::Full(all_nodes) => {
                     copath.push(all_nodes[sibling_index as usize].clone());
                 },
-                TreeStorageType::StoredLeaves(_) => {
+                TreeStorageType::Leaves(_) => {
                     panic!("This implementation requires all node hashes to be stored");
                 },
             }
 
-            current_index = Self::get_parent_index_copy_padding(current_index, size_of_current_level, first_index_of_current_level).unwrap(); 
+            current_index = Self::parent_index_copy_padding(current_index, size_of_current_level, first_index_of_current_level).unwrap(); 
             first_index_of_current_level += size_of_current_level; 
             size_of_current_level = (size_of_current_level + 1) / 2;
             }
@@ -300,7 +332,7 @@ impl MerkleAVC {
         Ok(copath)
     }
 
-    pub(crate) fn generate_copath_for_zero_padded_full_tree(&self, index: u16) -> Result<Vec<Vec<u8>>, TreeIndexError> {
+    pub fn open_zero_padding(&self, index: u16) -> Result<Vec<Vec<u8>>, TreeIndexError> {
         if index >= self.num_attributes {
             return Err(TreeIndexError::IndexOutOfBounds);
         }
@@ -309,15 +341,15 @@ impl MerkleAVC {
         let mut current_index = index;
 
         while current_index < Self::root_index(self.height) {
-            let parent_index = Self::get_parent_index_zero_padding(self.height, current_index).unwrap(); 
+            let parent_index = Self::parent_index_zero_padding(self.height, current_index).unwrap(); 
             //won't panic because current_index is guaranteed to not be the root here
             let sibling_index = current_index ^ 1;
 
             match &self.stored_values {
-                TreeStorageType::StoredLeavesAndCalculatedHashes(all_nodes) => {
+                TreeStorageType::Full(all_nodes) => {
                     copath.push(all_nodes[sibling_index as usize].clone());
                 },
-                TreeStorageType::StoredLeaves(_) => {
+                TreeStorageType::Leaves(_) => {
                     panic!("This implementation requires all node hashes to be stored");
                 },
             }
@@ -328,7 +360,7 @@ impl MerkleAVC {
         Ok(copath)
     }
 
-    pub(crate) fn verify_copath_for_copy_padded_full_tree(
+    pub fn verify_copy_padding(
         copath: &Vec<Vec<u8>>,
         root: &Vec<u8>,
         value: &Vec<u8>,
@@ -365,7 +397,7 @@ impl MerkleAVC {
             }
             computed_hash = hasher.finalize().to_vec(); // my previously owned vector is dropped here and a new one is copied in
 
-            current_index = match Self::get_parent_index_copy_padding(current_index, size_of_current_level, first_index_of_current_level) {
+            current_index = match Self::parent_index_copy_padding(current_index, size_of_current_level, first_index_of_current_level) {
                 Ok(parent) => parent,
                 Err(_) => return false, // should not happen if inputs are correct
             };
@@ -376,7 +408,7 @@ impl MerkleAVC {
         &computed_hash == root
     }
 
-    pub(crate) fn verify_copath_for_zero_padded_full_tree(
+    pub fn verify_zero_padding(
         copath: &Vec<Vec<u8>>,
         root: &Vec<u8>,
         value: &Vec<u8>,
@@ -408,7 +440,7 @@ impl MerkleAVC {
                 hasher.update(&computed_hash);
             }
             computed_hash = hasher.finalize().to_vec(); // my previously owned vector is dropped here and a new one is copied in
-            current_index = match Self::get_parent_index_zero_padding(height, current_index) {
+            current_index = match Self::parent_index_zero_padding(height, current_index) {
                 Ok(parent) => parent,
                 Err(_) => return false, // should not happen if inputs are correct
             };
@@ -447,9 +479,9 @@ impl VectorCommitment for MerkleAVC {
     }
 
     fn commit(vector: &[Self::Element], _key: &Self::KeyMaterial) -> Self::Commitment {
-        Self::build_zero_padded_full_tree_from_data(vector).root 
+        Self::build_zero_padding(vector).root
         // this does a lot of work to build the whole tree just to return the root
-        // maybe let's implement a method that solely computes the root from the leaves 
+        // maybe let's implement a method that solely computes the root from the leaves
         // without storing the whole tree
     }
 
@@ -462,10 +494,9 @@ impl VectorCommitment for MerkleAVC {
         if index >= vector.len() {
             panic!("Index out of bounds");
         }
-        Self::generate_copath_for_zero_padded_full_tree(
-            &Self::build_zero_padded_full_tree_from_data(vector), //this is inefficient because it rebuilds the whole tree just to get the copath
-            index as u16,
-        ).unwrap()
+        Self::build_zero_padding(vector) //this is inefficient because it rebuilds the whole tree just to get the copath
+            .open_zero_padding(index as u16)
+            .unwrap()
     }
 
     fn verify(

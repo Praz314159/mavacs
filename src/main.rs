@@ -25,6 +25,6 @@ fn main() {
         vec![4u8; 32],
     ];
 
-    let mvc:MerkleAVC = MerkleAVC::build_from_data(&data, PaddingScheme::Copy, TreeStorageType::StoredLeavesAndCalculatedHashes(vec![]));
+    let mvc:MerkleAVC = MerkleAVC::build(&data, PaddingRule::Copy, TreeStorageType::Full(vec![]));
 
 }
