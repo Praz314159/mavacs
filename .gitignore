@@ -1,1 +1,7 @@
 /target
+
+# Profile outputs (keep directory structure)
+profiles/**/*.json
+profiles/**/*.svg
+flamegraph.svg
+dhat-heap.json
