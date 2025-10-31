@@ -1,0 +1,1 @@
+// TODO: trait for accumulator
